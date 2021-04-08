@@ -1,0 +1,75 @@
+version: "3.7"
+
+services:
+    traefik:
+        container_name: traefik
+        image: traefik:v2.4.8
+        ports:
+            - 80:80
+            - 443:443
+            # In valumes we are telling traefik to watch docker.sock, to store the 
+            # public certificates in traefik-public-certificates and to log the 
+            # access and traefik logs to /log
+        volumes:
+            - /var/run/docker.sock:/var/run/docker.sock:ro
+            - traefik-public-certificates:/certificates
+            - ./log/:/logs/
+
+            # Traefik uses labels to declare the applications functions, the below is 
+            # seperated by function
+        labels:
+            # Enable traefik, utilize the network labeled public and set the loadbalanced
+            # service to 8080
+            - traefik.enable=true
+            - traefik.docker.network=public
+            - traefik.http.services.traefik-dashboard.loadbalancer.server.port=8080
+            # Declare where the traefik dashboard should live and which protocol to use
+            - traefik.http.routers.traefik-dashboard-http.entrypoints=http
+            - traefik.http.routers.traefik-dashboard-http.rule=Host(` <YOUR DOMAIN> `)
+            # Enable tls and offer the same dashboard on https
+            - traefik.http.routers.traefik-dashboard-https.tls=true
+            - traefik.http.routers.traefik-dashboard-https.entrypoints=https
+            - traefik.http.routers.traefik-dashboard-https.rule=Host(` <YOUR DOMAIN> `)      
+            # Use lets Encrypt for certification of the dashboard and enable the Traefik API
+            - traefik.http.routers.traefik-dashboard-https.tls.certresolver=le
+            - traefik.http.routers.traefik-dashboard-https.service=api@internal
+            # Mandate via middleware that HTTPS is used at all times and if any connections
+            # occur over http redirect
+            - traefik.http.middlewares.https-redirect.redirectscheme.scheme=https
+            - traefik.http.middlewares.https-redirect.redirectscheme.permanent=true
+            - traefik.http.routers.traefik-dashboard-http.middlewares=https-redirect
+            # Utilize basic authentication middleware to secure the dashboard and enable
+            # the middleware to handle the dashboard
+            - traefik.http.middlewares.admin-auth.basicauth.users=admin:<YOUR HASHED PASSWORD>
+            - traefik.http.routers.traefik-dashboard-https.middlewares=admin-auth
+        
+        command:
+            # command is the equivlent of sending the same parameters over cli, without having to type it out
+            # Below we are telling Traefik our environment is Docker and that we do NOT was to expose all
+            # Docker containers by default, we then provide our two methods of ingress communication
+            - --providers.docker
+            - --providers.docker.exposedbydefault=false
+            - --entrypoints.http.address=:80
+            - --entrypoints.https.address=:443
+            # Below we specify to use the lets encrypt staging server and supply the challenge email and type
+            - --certificatesresolvers.le.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory
+            - --certificatesresolvers.le.acme.email=admin@yourdomain.com
+            - --certificatesresolvers.le.acme.storage=/certificates/acme.json
+            - --certificatesresolvers.le.acme.tlschallenge=true
+            # Here we are enabling our logging to help DEBUG and log access to a local file for later review
+            - --accesslog=true
+            - --accesslog.filepath=/logs/access.log
+            - --accesslog.bufferingsize=100
+            - --log.level=DEBUG
+            - --log.filePath=/logs/traefik.log
+            # Enable the dashboard
+            - --api
+        networks:
+            - public
+
+volumes:
+    traefik-public-certificates:
+
+networks:
+    public:
+        external: true
